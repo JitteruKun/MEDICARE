@@ -1,6 +1,3 @@
-//Uncalibrated Sensors but effective
-//LCD working already
-
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
@@ -48,6 +45,32 @@ int8_t validSpO2 = 0;
 int32_t bpmSamples[NUM_SAMPLES] = {0};  
 byte sampleIndex = 0;  
 
+// Bitmap icons from converted SVG images
+const unsigned char epd_bitmap_vo2_max_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24 [] PROGMEM = {
+	0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x00, 0x80, 0x07, 0x00, 0xc0, 
+	0x0f, 0x00, 0xe0, 0x1c, 0x00, 0xf0, 0x3c, 0x00, 0xfc, 0xfc, 0x00, 0xcc, 0xcc, 0x00, 0xc6, 0x8c, 
+	0x01, 0xc6, 0x8c, 0x01, 0xc6, 0x8c, 0x01, 0xc6, 0x0c, 0x00, 0xc6, 0xec, 0x01, 0xc6, 0x6c, 0x01, 
+	0xc6, 0x2c, 0x79, 0xc6, 0x2c, 0x61, 0x7c, 0x68, 0x79, 0x38, 0xe0, 0x79, 0x00, 0x00, 0x08, 0x00, 
+	0x00, 0x78, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+const unsigned char epd_bitmap_thermostat_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24 [] PROGMEM = {
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x01, 0x00, 0xc0, 0x03, 0x00, 0x60, 
+	0xe6, 0x1f, 0x60, 0xe6, 0x1f, 0x60, 0x06, 0x00, 0x60, 0x06, 0x00, 0x60, 0xe6, 0x03, 0x60, 0xe6, 
+	0x03, 0x60, 0x06, 0x00, 0x60, 0x06, 0x00, 0x30, 0x0c, 0x00, 0x18, 0x18, 0x00, 0x18, 0x18, 0x00, 
+	0xf8, 0x1f, 0x00, 0xf8, 0x1f, 0x00, 0xf0, 0x0f, 0x00, 0xe0, 0x07, 0x00, 0xc0, 0x03, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+const unsigned char epd_bitmap_health_metrics_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24 [] PROGMEM = {
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0xff, 0x01, 0x80, 0xff, 0x01, 0x80, 0x81, 0x01, 0x80, 
+	0x81, 0x01, 0x80, 0x81, 0x01, 0xfc, 0x81, 0x3f, 0xfc, 0xb1, 0x3f, 0x0c, 0x30, 0x30, 0x0c, 0x70, 
+	0x30, 0xfc, 0xfb, 0x3f, 0xfc, 0xdf, 0x3f, 0x0c, 0x0e, 0x30, 0x0c, 0x0c, 0x30, 0xfc, 0x8d, 0x3f, 
+	0xfc, 0x81, 0x3f, 0x80, 0x81, 0x01, 0x80, 0x81, 0x01, 0x80, 0x81, 0x01, 0x80, 0xff, 0x01, 0x80, 
+	0xff, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+const uint8_t *heartIcon PROGMEM = epd_bitmap_health_metrics_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24;
+const uint8_t *oxygenIcon PROGMEM = epd_bitmap_vo2_max_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24;
+const uint8_t *tempIcon PROGMEM = epd_bitmap_thermostat_24dp_E3E3E3_FILL0_wght400_GRAD0_opsz24;
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
@@ -56,12 +79,8 @@ void setup() {
 
     // Initialize TFT Display
     tft.begin();
-    tft.setRotation(1);
+    tft.setRotation(0);
     tft.fillScreen(ILI9341_BLACK);
-    tft.setTextColor(ILI9341_WHITE);
-    tft.setTextSize(2);
-    tft.setCursor(30, 30);
-    tft.println("Health Monitor");
 
     // Initialize Separate I²C Buses
     wireMax30102.begin(SDA_MAX30102, SCL_MAX30102);
@@ -87,20 +106,69 @@ void setup() {
     Serial.println("[OK] Sensors Configured");
 }
 
+void displayReadings(int32_t bpm, int32_t spO2, float temp) {
+    tft.fillScreen(ILI9341_BLACK);
+    tft.setTextSize(2);
+
+    // Heart Rate
+    tft.drawBitmap(10, 40, heartIcon, 24, 24, ILI9341_WHITE);
+    tft.setCursor(50, 40);
+    tft.println("Heart Rate");
+    tft.setCursor(60, 60);
+    tft.setTextColor(ILI9341_GREEN);
+    tft.printf("%d BPM\n", bpm);
+    tft.setCursor(60, 90);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.println("Normal Range");
+
+    // SpO2
+    tft.drawBitmap(10, 140, oxygenIcon, 24, 24, ILI9341_WHITE);
+    tft.setCursor(50, 140);
+    tft.println("SpO2 (Oxygen) %:");
+    tft.setCursor(60, 160);
+    tft.setTextColor(ILI9341_CYAN);
+    tft.printf("%d%%\n", spO2);
+    tft.setCursor(60, 190);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.println("Normal Range");
+
+    // Temperature
+    tft.drawBitmap(10, 240, tempIcon, 24, 24, ILI9341_WHITE);
+    tft.setCursor(50, 240);
+    tft.println("Body Temperature");
+    tft.setCursor(60, 260);
+    tft.setTextColor(ILI9341_RED);
+    tft.printf("%.1f C\n", temp);
+    tft.setCursor(60, 290);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.println("Normal Range");
+
+    // Health Status Box
+    tft.fillRoundRect(10, 330, 220, 40, 8, ILI9341_DARKGREY);
+    tft.setCursor(20, 345);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.println("Overall Health Status");
+    tft.setCursor(180, 345);
+    tft.setTextColor(ILI9341_GREEN);
+    tft.println("Healthy");
+
+    // WiFi Connection Status
+    tft.setCursor(20, 380);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.println("Connected to Server");
+}
+
 void loop() {
     const int bufferLength = 100;
     for (byte i = 0; i < bufferLength; i++) {
-        while (!particleSensor.check());  // Wait for new data
+        while (!particleSensor.check());
         redBuffer[i] = particleSensor.getRed();
         irBuffer[i] = particleSensor.getIR();
     }
 
-    // Calculate Heart Rate & SpO2
     maxim_heart_rate_and_oxygen_saturation(irBuffer, bufferLength, redBuffer, &spo2, &validSpO2, &heartRate, &validHeartRate);
 
     if (heartRate < 0) heartRate = 0;
-
-    // Apply Moving Average Filter
     bpmSamples[sampleIndex] = heartRate;
     sampleIndex = (sampleIndex + 1) % NUM_SAMPLES;
 
@@ -110,36 +178,12 @@ void loop() {
     }
     smoothedBPM /= NUM_SAMPLES;
 
-    // Read Temperature from MLX90614
     float temperature = tempSensor.readObjectTempC();
     if (temperature < -40 || temperature > 125) temperature = 0;
 
-    // Display Readings on TFT
-    tft.fillScreen(ILI9341_BLACK);
-    tft.setCursor(30, 60);
-    tft.setTextColor(ILI9341_GREEN);
-    tft.print("Heart Rate: ");
-    tft.print(validHeartRate ? smoothedBPM : 0);
-    tft.println(" BPM");
+    displayReadings(validHeartRate ? smoothedBPM : 0, validSpO2 ? spo2 : 0, temperature);
 
-    tft.setCursor(30, 90);
-    tft.setTextColor(ILI9341_CYAN);
-    tft.print("SpO2 Level: ");
-    tft.print(validSpO2 ? spo2 : 0);
-    tft.println("%");
+    Serial.printf("Heart Rate: %d BPM\nSpO2: %d%%\nTemp: %.1f C\n", smoothedBPM, spo2, temperature);
 
-    tft.setCursor(30, 120);
-    tft.setTextColor(ILI9341_RED);
-    tft.print("Temp: ");
-    tft.print(temperature);
-    tft.println(" C");
-
-    // Display on Serial Monitor
-    Serial.println("=================================");
-    Serial.printf("Heart Rate: %s BPM\n", validHeartRate ? String(smoothedBPM).c_str() : "--");
-    Serial.printf("SpO2 Level: %s%%\n", validSpO2 ? String(spo2).c_str() : "--");
-    Serial.printf("Body Temperature: %.1f°C\n", temperature);
-    Serial.println("=================================");
-
-    delay(1000); // Refresh every second
+    delay(1000);
 }

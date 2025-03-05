@@ -1,92 +1,90 @@
-#include <Wire.h>
-#include <TFT_eSPI.h>          
-#include <Adafruit_MLX90614.h>
-#include <MAX30105.h>
-#include <heartRate.h>
-#include <spo2_algorithm.h>
+//CALIBRATED MAX10302
 
-//  Define I²C Pins for ESP32-S2 (Single Bus for Both Sensors)
+#include <Wire.h>
+#include "MAX30105.h"
+#include "spo2_algorithm.h"
+
+MAX30105 particleSensor;
+
+// I²C Pin Assignments for ESP32-S2
 #define SDA_PIN 21
 #define SCL_PIN 22
 
-//  Initialize Peripherals
-TFT_eSPI tft = TFT_eSPI();       // TFT Display
-MAX30105 heartSensor;            // MAX30102 Heart Rate & SpO₂ Sensor
-Adafruit_MLX90614 tempSensor = Adafruit_MLX90614();  // MLX90614 Temperature Sensor
+// Data Buffers
+uint32_t irBuffer[100]; 
+uint32_t redBuffer[100];
+
+int32_t heartRate = 0;
+int32_t spo2 = 0;
+int8_t validHeartRate = 0;
+int8_t validSpO2 = 0;
+
+// Moving Average Filter
+#define NUM_SAMPLES 10  
+int32_t bpmSamples[NUM_SAMPLES] = {0};  
+byte sampleIndex = 0;  
 
 void setup() {
     Serial.begin(115200);
-    delay(1000); // Allow serial monitor to start
+    delay(1000);
 
-    Serial.println("\n=================================");
-    Serial.println("      MEDICARE MONITOR");
-    Serial.println("=================================");
+    Serial.println("\n=== ESP32-S2 MAX30102 Heart Rate & SpO₂ Monitor ===");
 
-    //  Initialize I²C Bus
+    // Initialize I²C with ESP32-S2 SDA/SCL
     Wire.begin(SDA_PIN, SCL_PIN);
-    Serial.println("[OK] I²C Initialized.");
+    Serial.println("[OK] I²C Initialized on SDA 21, SCL 22");
 
-    //  Initialize TFT Display
-    tft.init();
-    tft.setRotation(1);
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextSize(2);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    Serial.println("[OK] TFT Display Initialized.");
-
-    //  Initialize MAX30102 (Heart Rate Sensor)
-    if (!heartSensor.begin()) {  
-        Serial.println("[ERROR] MAX30102 Not Detected!");
-        tft.setCursor(10, 20);
-        tft.println("MAX30102 ERROR!");
+    // Initialize MAX30102
+    if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+        Serial.println("[ERROR] MAX30102 Not Detected! Check wiring.");
         while (1);
     }
-    Serial.println("[OK] MAX30102 Initialized.");
+    Serial.println("[OK] MAX30102 Initialized");
 
-    //  Initialize MLX90614 (Temperature Sensor)
-    if (!tempSensor.begin()) {
-        Serial.println("[ERROR] MLX90614 Not Detected!");
-        tft.setCursor(10, 50);
-        tft.println("MLX90614 ERROR!");
-        while (1);
-    }
-    Serial.println("[OK] MLX90614 Initialized.");
+    // Optimized Sensor Configuration
+    particleSensor.setup(
+        50,  // LED Brightness (Lowered for accuracy)
+        3,   // Sample Average (Higher = Less Noise)
+        2,   // LED Mode (2 = Red + IR)
+        25,  // Sample Rate (Lowered to reduce motion artifacts)
+        411, // Pulse Width (Increased for better accuracy)
+        4096 // ADC Range (Standard for HR & SpO₂)
+    );
 
-    Serial.println("=================================");
+    Serial.println("[OK] Sensor Configured");
 }
 
 void loop() {
-    //  Read Heart Rate and SpO₂
-    float irValue = heartSensor.getIR();
-    float heartRate = (irValue > 50000) ? (irValue / 1000.0) : 0; // adjust the value. Recommended to lower it
-    float spo2 = (irValue > 50000) ? (99 - (irValue / 20000.0)) : 0;
+    const int bufferLength = 100;  // FIXED: Declared bufferLength inside loop
 
-    //  Read Temperature from MLX90614
-    float temperature = tempSensor.readObjectTempC();
-    if (temperature < -40 || temperature > 125) temperature = 0;  
+    // Collect 100 samples
+    for (byte i = 0; i < bufferLength; i++) {
+        while (!particleSensor.check());  // Wait for new data
+        redBuffer[i] = particleSensor.getRed();
+        irBuffer[i] = particleSensor.getIR();
+    }
 
-    //  Display Data on TFT
-    updateDisplay(heartRate, spo2, temperature);
+    // Calculate Heart Rate & SpO₂
+    maxim_heart_rate_and_oxygen_saturation(
+        irBuffer, bufferLength, redBuffer, &spo2, &validSpO2, &heartRate, &validHeartRate);
 
-    //  Print Data to Serial Monitor
-    Serial.printf("\nHeart Rate: %.1f BPM\n", heartRate);
-    Serial.printf("SpO2 Level: %.1f %%\n", spo2);
-    Serial.printf("Temperature: %.1f °C\n", temperature);
+    // Ensure BPM is never negative
+    if (heartRate < 0) heartRate = 0;
+
+    // Apply Moving Average Filter
+    bpmSamples[sampleIndex] = heartRate;
+    sampleIndex = (sampleIndex + 1) % NUM_SAMPLES;
+
+    int32_t smoothedBPM = 0;
+    for (byte i = 0; i < NUM_SAMPLES; i++) {
+        smoothedBPM += bpmSamples[i];
+    }
+    smoothedBPM /= NUM_SAMPLES;
+
+    Serial.println("=================================");
+    Serial.printf("Heart Rate: %s BPM\n", validHeartRate ? String(smoothedBPM).c_str() : "--");
+    Serial.printf("SpO2 Level: %s%%\n", validSpO2 ? String(spo2).c_str() : "--");
     Serial.println("=================================");
 
-    delay(5000); // Wait 5 seconds before next reading
-}
-
-// Function to Update TFT Display
-void updateDisplay(float heartRate, float spo2, float temperature) {
-    tft.fillRect(10, 20, 220, 80, TFT_BLACK); // Clear only text area
-
-    tft.setCursor(10, 20);
-    tft.printf("HR: %.1f BPM", heartRate);
-
-    tft.setCursor(10, 50);
-    tft.printf("SpO2: %.1f%%", spo2);
-
-    tft.setCursor(10, 80);
-    tft.printf("Temp: %.1f C", temperature);
+    delay(1000); // Refresh every 1 second
 }

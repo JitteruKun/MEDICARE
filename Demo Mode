@@ -1,0 +1,76 @@
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ILI9341.h>
+
+// TFT Display Pins
+#define TFT_CS     5
+#define TFT_RST    4
+#define TFT_DC     2
+#define TFT_MOSI   23
+#define TFT_SCK    18
+#define TFT_MISO   19
+
+// Initialize TFT Display
+Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+
+void setup() {
+    Serial.begin(115200);
+    delay(1000);
+
+    tft.begin();
+    tft.setRotation(0);
+    tft.fillScreen(ILI9341_BLACK);
+}
+
+void displayReadings(float bpm, float spO2, float temp) {
+    tft.fillScreen(ILI9341_BLACK);
+    tft.setTextSize(2);
+
+    // Heart Rate
+    tft.setCursor(20, 40);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.println("Heart Rate");
+    tft.setCursor(20, 60);
+    tft.setTextColor(ILI9341_GREEN);
+    tft.printf("%.1f BPM\n", bpm);
+    tft.setCursor(20, 80);
+    tft.setTextColor(ILI9341_WHITE);
+
+
+    // Oxygen Saturation
+    tft.setCursor(20, 140);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.println("Oxygen Saturation");
+    tft.setCursor(20, 160);
+    tft.setTextColor(ILI9341_CYAN);
+    tft.printf("%.1f%%\n", spO2);
+    tft.setCursor(20, 180);
+    tft.setTextColor(ILI9341_WHITE);
+  
+
+    // Body Temperature
+    tft.setCursor(20, 240);
+    tft.setTextColor(ILI9341_WHITE);
+    tft.println("Body Temperature");
+    tft.setCursor(20, 260);
+    tft.setTextColor(ILI9341_RED);
+    tft.printf("%.1f C\n", temp);
+    tft.setCursor(20, 280);
+    tft.setTextColor(ILI9341_WHITE);
+   
+}
+
+void loop() {
+    // Generate values in the given range
+    float heartRate = random(600, 1001) / 10.0;  // 60.0 - 100.0 BPM
+    float spo2 = 100.0;  // Fixed at 100%
+    float temperature = random(364, 366) / 10.0; // 36.4 - 36.5°C
+
+    // Update Display
+    displayReadings(heartRate, spo2, temperature);
+
+    // Print to Serial Monitor
+    Serial.printf("Heart Rate: %.1f BPM\nSpO2: %.1f%%\nTemp: %.1f C\n", heartRate, spo2, temperature);
+
+    delay(10000); // Refresh every 2 seconds
+}
